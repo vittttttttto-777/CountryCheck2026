@@ -113,6 +113,37 @@ const S = {
   you:{ru:'это вы',en:'you'},
   adminBack:{ru:'‹ К стране',en:'‹ Back'},
   adminBackOv:{ru:'‹ Сводка',en:'‹ Overview'},
+  finish:{ru:'Завершить аудит страны',en:'Complete country audit'},
+  finishing:{ru:'Сохраняю…',en:'Saving…'},
+  finishAsk:{ru:'Завершить аудит «{c}» и записать результат?',en:'Complete the audit of “{c}” and record the result?'},
+  finishOpen:{ru:'• не отмечено строк: {n}',en:'• unanswered rows: {n}'},
+  finishNoCmt:{ru:'• «Нет» без пояснения: {n}',en:'• “No” without explanation: {n}'},
+  finishLater:{ru:'Их можно дополнить позже — страна останется в вашем списке.',en:'You can fill them in later — the country stays on your list.'},
+  finishSaveFail:{ru:'Не все изменения сохранены. Проверьте связь и нажмите ещё раз.',en:'Some changes are not saved yet. Check the connection and try again.'},
+  finishedBanner:{ru:'Аудит «{c}» завершён и записан: стадия {s}, ✓ {y} есть, ✗ {n} нет. Можно открыть следующую страну.',
+                  en:'Audit of “{c}” completed and recorded: stage {s}, ✓ {y} yes, ✗ {n} no. You can open the next country.'},
+  done:{ru:'Завершён {d}',en:'Completed {d}'},
+  inWork:{ru:'В работе',en:'In progress'},
+  countLimit:{ru:'{n} из {m}',en:'{n} of {m}'},
+  limitReached:{ru:'Достигнут предел в {m} стран. Откройте страну из списка или удалите ненужную.',en:'Limit of {m} countries reached. Open one from the list or delete one you no longer need.'},
+  E_LIMIT_30:{ru:'Достигнут предел в 30 стран.',en:'Limit of 30 countries reached.'},
+  colStatus:{ru:'Статус',en:'Status'},
+  turnover:{ru:'Товарооборот, € / мес',en:'Turnover, € / month'},
+  turnoverPh:{ru:'напр. 52 000',en:'e.g. 52,000'},
+  colTurnover:{ru:'Товарооборот',en:'Turnover'},
+  tabReport:{ru:'Сводная таблица',en:'Summary table'},
+  reportP:{ru:'Все страны всех руководителей: товарооборот и ответы по чек-листу на стадиях до текущей включительно.',
+           en:'All countries of all division heads: turnover and checklist answers for stages up to the current one.'},
+  colYesItems:{ru:'Чек-лист: есть',en:'Checklist: yes'},
+  colNoItems:{ru:'Чек-лист: нет',en:'Checklist: no'},
+  colComments:{ru:'Комментарии',en:'Comments'},
+  filterAll:{ru:'Все руководители',en:'All division heads'},
+  search:{ru:'Поиск по стране…',en:'Search country…'},
+  noRows:{ru:'Нет данных',en:'No data'},
+  exportXls:{ru:'Выгрузить в Excel (CSV)',en:'Export to Excel (CSV)'},
+  stShort:{ru:'С{n}',en:'S{n}'},
+  repHead:{ru:['Страна','Руководитель','Стадия','Товарооборот, €/мес','Статус','Есть, шт.','Нет, шт.','Не отмечено, шт.','Чек-лист: есть','Чек-лист: нет','Комментарии'],
+           en:['Country','Division head','Stage','Turnover, €/mo','Status','Yes, #','No, #','Open, #','Checklist: yes','Checklist: no','Comments']},
   csvHead:{ru:['Руководитель','Страна','Текущая стадия','Стадия','Раздел','№','Пункт','Статус','Комментарий'],
            en:['Division head','Country','Current stage','Stage','Section','#','Item','Status','Comment']},
 };
@@ -126,6 +157,8 @@ let READONLY = false;    // admin viewing someone else's audit
 let VIEW = 'login';
 let CUR_PHASE = 0;
 let ADMIN_TAB = 'overview';
+let LAST_FINISH = null;  // result of the last completed audit, shown on the country screen
+const MAX_COUNTRIES = 30;
 
 function lsGet(k){ try { return localStorage.getItem(k); } catch(e){ return null; } }
 function lsSet(k,v){ try { v==null ? localStorage.removeItem(k) : localStorage.setItem(k,v); } catch(e){} }
@@ -139,6 +172,11 @@ function L(obj){ if(!obj) return ''; return obj[LANG] !== undefined ? obj[LANG] 
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function strip(html){ const d=document.createElement('div'); d.innerHTML=html; return d.textContent.trim(); }
 function key(ph, sec, idx){ return ph+'|'+sec+'|'+idx; }
+function fmtMoney(v){ if (v==null || v==='') return ''; const n=Number(v); return isFinite(n) ? n.toLocaleString(LANG==='ru'?'ru-RU':'en-GB',{maximumFractionDigits:2}) : ''; }
+function itemText(phase, sec, idx, fallback){
+  const p = PHASES[phase-1]; const arr = p && (sec==='build' ? L(p.build) : L(p.leader));
+  return strip((arr && arr[idx]) || fallback || '');
+}
 function fmtDate(s){ try { return new Date(s).toLocaleString(LANG==='ru'?'ru-RU':'en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}); } catch(e){ return ''; } }
 
 /* ================= api ================= */
@@ -202,6 +240,12 @@ async function flush(){
   } finally { flushing = false; }
   setSaveState(failed ? 'fail' : (PENDING.size ? 'busy' : 'ok'));
   if (failed) toast(t('netErr'));
+}
+async function flushAll(){
+  TIMERS.forEach(tm => clearTimeout(tm)); TIMERS.clear();
+  for (let i=0; i<50 && flushing; i++) await new Promise(r=>setTimeout(r,100));
+  await flush();
+  return PENDING.size === 0 && saveState !== 'fail';
 }
 window.addEventListener('beforeunload', e => { if (PENDING.size){ e.preventDefault(); e.returnValue=''; } });
 
@@ -297,12 +341,13 @@ async function renderCountry(){
       </div>
       ${langSwitch()}
     </div>
+    ${LAST_FINISH ? `<div class="finished">${IC.check}<span>${esc(t('finishedBanner',{c:LAST_FINISH.country,s:LAST_FINISH.stage,y:LAST_FINISH.yes,n:LAST_FINISH.no}))}</span></div>` : ''}
     <form id="cf">
       <input class="input" id="cin" placeholder="${esc(t('countryPh'))}" aria-label="${esc(t('country'))}" maxlength="80" autofocus required>
       <button class="btn primary" type="submit">${t('open')}</button>
     </form>
-    <div class="hint">${t('pickHint')}</div>
-    <div class="clist-h">${t('myCountries')}</div>
+    <div class="hint" id="chint">${t('pickHint')}</div>
+    <div class="clist-h" style="display:flex;justify-content:space-between"><span>${t('myCountries')}</span><span id="ccount"></span></div>
     <div class="clist" id="clist"><div class="empty">…</div></div>
     <div class="foot">
       <div>${SESSION.is_admin?`<button class="btn" id="toAdmin">${t('admin')}</button>`:''}</div>
@@ -316,12 +361,21 @@ async function renderCountry(){
   try {
     const list = await rpc('ca_list_countries', {p_token: SESSION.token});
     const el = document.getElementById('clist'); if (!el) return;
+    const cc = document.getElementById('ccount'); if (cc) cc.textContent = t('countLimit',{n:list.length,m:MAX_COUNTRIES});
+    if (list.length >= MAX_COUNTRIES){
+      const h = document.getElementById('chint'); if (h){ h.textContent = t('limitReached',{m:MAX_COUNTRIES}); h.style.color='var(--no)'; }
+      const f = document.getElementById('cf');
+      f.onsubmit = e => { e.preventDefault(); const v=document.getElementById('cin').value.trim();
+        const hit = list.find(c=>c.country.toLowerCase()===v.toLowerCase());
+        if (hit) openCountry(hit.country); else toast(t('limitReached',{m:MAX_COUNTRIES})); };
+    }
     if (!list.length){ el.innerHTML = `<div class="empty">${t('noCountries')}</div>`; return; }
     el.innerHTML = list.map(c=>{
       const tot = totalItems(c.stage), done = c.yes + c.no, pct = tot ? Math.round(done/tot*100) : 0;
+      const st = c.completed_at ? `<span class="st-done">${esc(t('done',{d:fmtDate(c.completed_at)}))}</span>` : `<span class="st-work">${t('inWork')}</span>`;
       return `<div class="citem" data-c="${esc(c.country)}">
-        <div class="nm">${esc(c.country)}</div>
-        <div class="meta">${t('stageN',{n:c.stage})} · ${esc(stageShort(c.stage-1))}<br>${t('answered',{a:done,t:tot})}</div>
+        <div class="nm"><span class="nmt">${esc(c.country)}</span><div style="margin-top:3px">${st}</div></div>
+        <div class="meta">${t('stageN',{n:c.stage})} · ${esc(stageShort(c.stage-1))}<br>${t('answered',{a:done,t:tot})}${c.turnover!=null?` · € ${esc(fmtMoney(c.turnover))}`:''}</div>
         <div class="mini"><i style="width:${pct}%"></i></div>
         <button class="del" data-id="${c.id}" data-n="${esc(c.country)}" title="${esc(t('del'))}">${IC.trash}</button>
       </div>`;
@@ -336,14 +390,14 @@ async function renderCountry(){
 }
 
 function loadAudit(a){
-  AUDIT = {id:a.id, country:a.country, stage:a.stage, define_text:a.define_text||'', owner:a.owner};
+  AUDIT = {id:a.id, country:a.country, stage:a.stage, turnover:a.turnover, define_text:a.define_text||'', owner:a.owner, completed_at:a.completed_at};
   ANS = {};
   (a.items||[]).forEach(it=>{ ANS[key(it.phase,it.section,it.idx)] = {status:it.status, comment:it.comment||''}; });
 }
 async function openCountry(name){
   try {
     const a = await rpc('ca_open_country',{p_token:SESSION.token, p_country:name});
-    loadAudit(a); READONLY = false; go('map');
+    loadAudit(a); READONLY = false; LAST_FINISH = null; go('map');
   } catch(err){ toast(errText(err)); }
 }
 
@@ -381,9 +435,14 @@ function stageBar(){
   return `<section class="stagebar">
     <div class="row1">
       <div><h2>${t('whereH')}</h2><p>${t('whereP')}</p></div>
-      <div class="overall"><span>${t('overall',{n:AUDIT.stage})}</span>
-        <div class="obar"><i class="y" style="width:${pctY}%"></i><i class="n" style="width:${pctN}%"></i></div>
-        <b>${ov.y+ov.n}/${ov.total}</b></div>
+      <div class="row1r">
+        <label class="turn"><span>${t('turnover')}</span>
+          <input class="input" id="turnIn" inputmode="decimal" placeholder="${esc(t('turnoverPh'))}" value="${AUDIT.turnover!=null?esc(fmtMoney(AUDIT.turnover)):''}" ${READONLY?'disabled':''}></label>
+        <div class="overall"><span>${t('overall',{n:AUDIT.stage})}</span>
+          <div class="obar"><i class="y" style="width:${pctY}%"></i><i class="n" style="width:${pctN}%"></i></div>
+          <b>${ov.y+ov.n}/${ov.total}</b></div>
+        ${READONLY?'':`<button class="btn primary finish-btn">${IC.check}${t('finish')}</button>`}
+      </div>
     </div>
     <div class="seg" id="seg">${PHASES.map((p,i)=>`
       <button data-s="${i+1}" class="${i+1===AUDIT.stage?'on':i+1<AUDIT.stage?'past':''}" ${READONLY?'disabled':''}>
@@ -431,11 +490,25 @@ function renderMap(){
         ${READONLY?`<button class="btn sm" id="backOv">${t('adminBackOv')}</button>`:''}
         <button class="btn sm" id="toGaps">${t('gaps')}</button>
         <button class="btn sm" id="csv">${IC.dl}${t('exportCsv')}</button>
+        ${READONLY?'':`<button class="btn sm primary finish-btn">${IC.check}${t('finish')}</button>`}
       </span>
     </div>`);
   bindShell();
+  bindFinish();
   ROOT.querySelectorAll('.st').forEach(el=>el.onclick=()=>{ CUR_PHASE=+el.dataset.i; go('phase'); });
   ROOT.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>setStage(+b.dataset.s));
+  const ti = document.getElementById('turnIn');
+  if (ti && !READONLY){
+    ti.addEventListener('input', () => {
+      const raw = ti.value.replace(/[\s €]/g,'').replace(',', '.');
+      const v = raw === '' ? null : Number(raw);
+      if (raw !== '' && (!isFinite(v) || v < 0)){ ti.style.borderColor='var(--no)'; return; }
+      ti.style.borderColor='';
+      AUDIT.turnover = v;
+      queueSave('turnover', {fn:'ca_set_turnover', args:{p_token:SESSION.token, p_audit:AUDIT.id, p_value:v}}, 700);
+    });
+    ti.addEventListener('blur', () => { if (AUDIT.turnover!=null) ti.value = fmtMoney(AUDIT.turnover); });
+  }
   document.getElementById('toGaps').onclick = () => go('gaps');
   document.getElementById('csv').onclick = exportCsv;
   const bo = document.getElementById('backOv'); if (bo) bo.onclick = () => go('admin');
@@ -505,7 +578,10 @@ function renderPhase(){
           <ul class="chk" id="chkL">${l.map(itemHtml).join('')}</ul>
           <div class="ph-nav">
             ${i>0?`<button class="btn" id="prev">${t('prev')}</button>`:'<span></span>'}
-            ${i<PHASES.length-1?`<button class="btn" id="next">${t('next')}</button>`:'<span></span>'}
+            <span style="display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end">
+              ${!READONLY && st===AUDIT.stage?`<button class="btn primary finish-btn">${IC.check}${t('finish')}</button>`:''}
+              ${i<PHASES.length-1?`<button class="btn" id="next">${t('next')}</button>`:''}
+            </span>
           </div>
         </div>
         <aside class="ph-side">
@@ -518,6 +594,7 @@ function renderPhase(){
   document.getElementById('back').onclick = () => go('map');
   const pv = document.getElementById('prev'); if (pv) pv.onclick = () => { CUR_PHASE--; go('phase'); };
   const nx = document.getElementById('next'); if (nx) nx.onclick = () => { CUR_PHASE++; go('phase'); };
+  bindFinish();
   updatePhaseCounts();
 
   if (!READONLY && !ahead){
@@ -623,13 +700,47 @@ function renderGaps(){
     <div style="display:flex;gap:10px;margin-bottom:14px"><button class="btn" id="back">${t('back')}</button></div>
     <section class="panel">
       <div class="panel-h"><div><h2>${t('gapsH')} · ${esc(AUDIT.country)}</h2><p>${t('gapsP',{n:AUDIT.stage})}</p></div>
-        <button class="btn sm" id="csv">${IC.dl}${t('exportCsv')}</button></div>
+        <span class="map-actions"><button class="btn sm" id="csv">${IC.dl}${t('exportCsv')}</button>
+        ${READONLY?'':`<button class="btn sm primary finish-btn">${IC.check}${t('finish')}</button>`}</span></div>
       ${open?`<div class="notice">${t('unanswered',{n:open})}</div>`:''}
       ${any?html:`<div class="okmsg">${t('noGaps')}</div>`}
     </section>`);
   bindShell();
   document.getElementById('back').onclick = () => go('map');
   document.getElementById('csv').onclick = exportCsv;
+  bindFinish();
+}
+
+/* ================= finish audit ================= */
+function bindFinish(){ ROOT.querySelectorAll('.finish-btn').forEach(b => b.onclick = () => finishAudit(b)); }
+async function finishAudit(btn){
+  if (READONLY || !AUDIT) return;
+  // what is still missing on stages 1..current
+  let open = 0, noCmt = 0;
+  for (let i=0;i<AUDIT.stage;i++){
+    const st=i+1;
+    phaseItems(i).forEach(it=>{ const a=ANS[key(st,it.sec,it.idx)];
+      if (!a || !a.status) open++; else if (a.status==='no' && !(a.comment||'').trim()) noCmt++; });
+  }
+  let msg = t('finishAsk',{c:AUDIT.country});
+  if (open || noCmt){
+    msg += '\n\n' + [open?t('finishOpen',{n:open}):'', noCmt?t('finishNoCmt',{n:noCmt}):''].filter(Boolean).join('\n');
+    msg += '\n\n' + t('finishLater');
+  }
+  if (!confirm(msg)) return;
+  const btns = ROOT.querySelectorAll('.finish-btn');
+  btns.forEach(b=>{ b.disabled = true; b.dataset.l = b.innerHTML; b.textContent = t('finishing'); });
+  try {
+    if (!(await flushAll())) throw new Error('SAVE');
+    const r = await rpc('ca_finish_audit', {p_token:SESSION.token, p_audit:AUDIT.id});
+    LAST_FINISH = r;
+    AUDIT = null; ANS = {}; CUR_PHASE = 0;
+    go('country');
+  } catch(err){
+    toast(err.message==='SAVE' ? t('finishSaveFail') : errText(err));
+    btns.forEach(b=>{ b.disabled = false; if (b.dataset.l) b.innerHTML = b.dataset.l; });
+  }
+  void btn;
 }
 
 /* ================= CSV ================= */
@@ -672,6 +783,7 @@ async function renderAdmin(){
     <main class="page">
       <div style="display:flex;gap:10px;margin-bottom:14px"><button class="btn" id="back">${t('adminBack')}</button></div>
       <div class="tabs"><button data-t="overview" class="${ADMIN_TAB==='overview'?'on':''}">${t('tabOverview')}</button>
+        <button data-t="report" class="${ADMIN_TAB==='report'?'on':''}">${t('tabReport')}</button>
         <button data-t="users" class="${ADMIN_TAB==='users'?'on':''}">${t('tabUsers')}</button></div>
       <section class="panel" id="apanel"><div class="empty">…</div></section>
     </main></div>`;
@@ -679,7 +791,7 @@ async function renderAdmin(){
   document.getElementById('lo').onclick = () => signOut();
   document.getElementById('back').onclick = () => go('country');
   ROOT.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{ ADMIN_TAB=b.dataset.t; renderAdmin(); });
-  try { ADMIN_TAB==='overview' ? await adminOverview() : await adminUsers(); }
+  try { ADMIN_TAB==='overview' ? await adminOverview() : ADMIN_TAB==='report' ? await adminReport() : await adminUsers(); }
   catch(err){ document.getElementById('apanel').innerHTML = `<div class="empty">${esc(errText(err))}</div>`; }
 }
 async function adminOverview(){
@@ -687,14 +799,16 @@ async function adminOverview(){
   const el = document.getElementById('apanel'); if (!el) return;
   if (!rows.length){ el.innerHTML = `<div class="empty">${t('noAudits')}</div>`; return; }
   el.innerHTML = `<div class="tblwrap"><table class="tbl"><thead><tr>
-      <th>${t('colOwner')}</th><th>${t('colCountry')}</th><th>${t('colStage')}</th>
-      <th class="num">✓ ${t('yes')}</th><th class="num">✗ ${t('no')}</th><th class="num">${t('open_')}</th><th>${t('colUpd')}</th><th></th></tr></thead>
+      <th>${t('colOwner')}</th><th>${t('colCountry')}</th><th>${t('colStage')}</th><th class="num">${t('colTurnover')}</th>
+      <th class="num">✓ ${t('yes')}</th><th class="num">✗ ${t('no')}</th><th class="num">${t('open_')}</th><th>${t('colStatus')}</th><th>${t('colUpd')}</th><th></th></tr></thead>
     <tbody>${rows.map(r=>{ const tot=totalItems(r.stage);
       return `<tr><td>${esc(r.label)}</td><td class="country">${esc(r.country)}</td>
         <td>${r.stage} · ${esc(stageShort(r.stage-1))}</td>
+        <td class="num" style="white-space:nowrap">${r.turnover!=null?'€ '+esc(fmtMoney(r.turnover)):'—'}</td>
         <td class="num"><span class="t-yes" style="padding:2px 7px;border-radius:5px">${r.yes}</span></td>
         <td class="num"><span class="t-no" style="padding:2px 7px;border-radius:5px">${r.no}</span></td>
         <td class="num">${tot-r.yes-r.no}</td>
+        <td>${r.completed_at?`<span class="st-done">${esc(t('done',{d:fmtDate(r.completed_at)}))}</span>`:`<span class="st-work">${t('inWork')}</span>`}</td>
         <td style="white-space:nowrap;color:var(--muted)">${fmtDate(r.updated_at)}</td>
         <td><div class="acts"><button class="btn sm" data-id="${r.id}">${t('view')}</button></div></td></tr>`; }).join('')}
     </tbody></table></div>`;
@@ -702,6 +816,76 @@ async function adminOverview(){
     try { const a = await rpc('ca_admin_audit',{p_token:SESSION.token,p_audit:b.dataset.id}); loadAudit(a); READONLY=true; go('map'); }
     catch(err){ toast(errText(err)); }
   });
+}
+/* ---- summary table: country · turnover · yes · no · comments ---- */
+let REPORT = [], REP_OWNER = '', REP_Q = '';
+function reportRows(){
+  return REPORT.filter(r => (!REP_OWNER || r.label===REP_OWNER) && (!REP_Q || r.country.toLowerCase().includes(REP_Q.toLowerCase())));
+}
+function prepReport(r){
+  const yes = [], no = [], cm = [];
+  (r.items||[]).forEach(it=>{
+    const lbl = t('stShort',{n:it.phase}), txt = itemText(it.phase, it.section, it.idx, it.text);
+    const row = {lbl, txt, comment:(it.comment||'').trim(), status:it.status};
+    if (it.status==='yes') yes.push(row); else if (it.status==='no') no.push(row);
+    if (row.comment) cm.push(row);
+  });
+  return {yes, no, cm, open: totalItems(r.stage) - yes.length - no.length};
+}
+async function adminReport(){
+  REPORT = await rpc('ca_admin_report',{p_token:SESSION.token});
+  const el = document.getElementById('apanel'); if (!el) return;
+  const owners = [...new Set(REPORT.map(r=>r.label))].sort();
+  el.innerHTML = `
+    <div class="panel-h"><div><h2>${t('tabReport')}</h2><p>${t('reportP')}</p></div>
+      <button class="btn sm" id="repCsv">${IC.dl}${t('exportXls')}</button></div>
+    <div class="repfilters">
+      <select class="input" id="repOwner"><option value="">${t('filterAll')}</option>${owners.map(o=>`<option ${o===REP_OWNER?'selected':''}>${esc(o)}</option>`).join('')}</select>
+      <input class="input" id="repQ" placeholder="${esc(t('search'))}" value="${esc(REP_Q)}">
+    </div>
+    <div class="tblwrap"><table class="tbl rep"><thead><tr>
+      <th>${t('colCountry')}</th><th class="num">${t('colTurnover')}</th>
+      <th>${t('colYesItems')}</th><th>${t('colNoItems')}</th><th>${t('colComments')}</th></tr></thead>
+      <tbody id="repBody"></tbody></table></div>`;
+  const draw = () => {
+    const rows = reportRows();
+    document.getElementById('repBody').innerHTML = rows.length ? rows.map(r=>{
+      const d = prepReport(r);
+      const li = (arr, cls) => arr.length ? `<ul class="rl ${cls}">${arr.map(x=>`<li><span class="sl">${x.lbl}</span>${esc(x.txt)}</li>`).join('')}</ul>` : '<span class="dash">—</span>';
+      const cms = d.cm.length ? `<ul class="rl cm">${d.cm.map(x=>`<li class="${x.status}"><span class="sl">${x.lbl} ${x.status==='no'?'✗':'✓'}</span><b>${esc(x.txt)}</b><div class="cmt-t">${esc(x.comment)}</div></li>`).join('')}</ul>` : '<span class="dash">—</span>';
+      return `<tr>
+        <td class="rc"><div class="country">${esc(r.country)}</div><div class="sub">${esc(r.label)}</div>
+          <div class="sub">${t('stageN',{n:r.stage})} · ${esc(stageShort(r.stage-1))}</div>
+          <div style="margin-top:6px">${r.completed_at?`<span class="st-done">${esc(t('done',{d:fmtDate(r.completed_at)}))}</span>`:`<span class="st-work">${t('inWork')}</span>`}</div>
+          ${d.open?`<div class="sub" style="margin-top:4px">${d.open} ${t('open_')}</div>`:''}</td>
+        <td class="num rt">${r.turnover!=null?'€ '+esc(fmtMoney(r.turnover)):'—'}</td>
+        <td><div class="cnt-h t-yes">✓ ${d.yes.length}</div>${li(d.yes,'y')}</td>
+        <td><div class="cnt-h t-no">✗ ${d.no.length}</div>${li(d.no,'n')}</td>
+        <td>${cms}</td></tr>`;
+    }).join('') : `<tr><td colspan="5"><div class="empty">${t('noRows')}</div></td></tr>`;
+  };
+  draw();
+  document.getElementById('repOwner').onchange = e => { REP_OWNER = e.target.value; draw(); };
+  document.getElementById('repQ').oninput = e => { REP_Q = e.target.value; draw(); };
+  document.getElementById('repCsv').onclick = exportReport;
+}
+function exportReport(){
+  const rows = [t('repHead')];
+  reportRows().forEach(r=>{
+    const d = prepReport(r);
+    const join = arr => arr.map(x=>`${x.lbl}: ${x.txt}`).join('\n');
+    rows.push([r.country, r.label, `${r.stage} · ${stageShort(r.stage-1)}`, r.turnover!=null?Number(r.turnover):'',
+      r.completed_at ? t('done',{d:fmtDate(r.completed_at)}) : t('inWork'),
+      d.yes.length, d.no.length, d.open, join(d.yes), join(d.no),
+      d.cm.map(x=>`${x.lbl} ${x.status==='no'?'✗':'✓'} ${x.txt} — ${x.comment}`).join('\n')]);
+  });
+  downloadCsv(rows, `audit-summary-${new Date().toISOString().slice(0,10)}.csv`);
+}
+function downloadCsv(rows, name){
+  const csv = '﻿' + rows.map(r=>r.map(v=>{ const s=String(v??''); return /[;"\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }).join(';')).join('\r\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
 }
 async function adminUsers(){
   const users = await rpc('ca_admin_users',{p_token:SESSION.token});

@@ -76,12 +76,11 @@ create or replace function public.ca_login(p_password text)
 returns json language plpgsql volatile security definer set search_path = public, extensions as $$
 declare u record; tok text;
 begin
-  if coalesce(length(p_password),0) < 4 then perform pg_sleep(0.4); return null; end if;
+  if coalesce(length(p_password),0) < 3 then perform pg_sleep(0.4); return null; end if;
   select * into u from ca_users where pass_hash = crypt(p_password, pass_hash) limit 1;
   if u.id is null then perform pg_sleep(0.6); return null; end if;
   tok := encode(gen_random_bytes(32), 'hex');
   insert into ca_sessions(token, user_id) values (tok, u.id);
-  delete from ca_sessions where expires_at < now();
   return json_build_object('token', tok, 'label', u.label, 'is_admin', u.is_admin);
 end $$;
 
