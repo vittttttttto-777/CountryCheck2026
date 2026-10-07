@@ -14,6 +14,8 @@ const IC = {
   trash:'<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>',
   info:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>',
   dl:'<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  out:'<svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>',
+  chev:'<svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>',
   lock:'<svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>'
 };
 
@@ -114,6 +116,9 @@ const S = {
   adminBack:{ru:'‹ К стране',en:'‹ Back'},
   adminBackOv:{ru:'‹ Сводка',en:'‹ Overview'},
   finish:{ru:'Завершить аудит страны',en:'Complete country audit'},
+  howTo:{ru:'Как это работает',en:'How it works'},
+  finishShort:{ru:'Завершить аудит',en:'Complete audit'},
+  aboutStage:{ru:'О стадии: зачем она, метрики, условие перехода',en:'About this stage: purpose, metrics, gate'},
   finishing:{ru:'Сохраняю…',en:'Saving…'},
   finishAsk:{ru:'Завершить аудит «{c}» и записать результат?',en:'Complete the audit of “{c}” and record the result?'},
   finishOpen:{ru:'• не отмечено строк: {n}',en:'• unanswered rows: {n}'},
@@ -218,7 +223,7 @@ function setSaveState(s){
   saveState = s;
   const el = document.getElementById('saving'); if(!el) return;
   el.className = 'saving' + (s==='busy'?' busy':s==='fail'?' fail':'');
-  el.innerHTML = `<i></i>${s==='busy'?t('saving'):s==='fail'?t('saveFail'):t('saved')}`;
+  el.innerHTML = `<i></i><span class="lbl">${s==='busy'?t('saving'):s==='fail'?t('saveFail'):t('saved')}</span>`;
 }
 function queueSave(k, payload, delay){
   PENDING.set(k, payload);
@@ -270,9 +275,22 @@ function overallTally(){
 }
 function stageShort(i){ return L(PHASES[i].short); }
 
+/* ================= mobile ================= */
+const MQ = window.matchMedia('(max-width:700px)');
+function isMobile(){ return MQ.matches; }
+MQ.addEventListener('change', () => {
+  const ae = document.activeElement;
+  if (ae && (ae.tagName==='TEXTAREA' || ae.tagName==='INPUT')) return; // don't kill typing (e.g. keyboard opening)
+  if (SESSION && (VIEW==='phase')) render();
+});
+
 /* ================= routing ================= */
 function go(view){ VIEW = view; render(); window.scrollTo(0,0); }
 function render(){
+  renderView();
+  if (window.tourAfter) window.tourAfter();
+}
+function renderView(){
   if (!SESSION) return renderLogin();
   switch (VIEW){
     case 'country': return renderCountry();
@@ -316,6 +334,7 @@ function renderLogin(){
       const r = await rpc('ca_login', {p_password: pw});
       if (!r){ er.textContent = t('badPass'); btn.disabled=false; document.getElementById('pw').select(); return; }
       SESSION = r; lsSet('ca-session', JSON.stringify(r));
+      if (window.tourMaybeStart) window.tourMaybeStart();
       go('country');
     } catch(err){ er.textContent = errText(err); btn.disabled=false; }
   };
@@ -350,7 +369,8 @@ async function renderCountry(){
     <div class="clist-h" style="display:flex;justify-content:space-between"><span>${t('myCountries')}</span><span id="ccount"></span></div>
     <div class="clist" id="clist"><div class="empty">…</div></div>
     <div class="foot">
-      <div>${SESSION.is_admin?`<button class="btn" id="toAdmin">${t('admin')}</button>`:''}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">${SESSION.is_admin?`<button class="btn" id="toAdmin">${t('admin')}</button>`:''}
+        <button class="btn ghost tour-start">? ${t('howTo')}</button></div>
       <button class="btn ghost" id="lo">${t('logout')}</button>
     </div>
   </div></div>`;
@@ -402,7 +422,7 @@ async function openCountry(name){
 }
 
 /* ================= app shell ================= */
-function shell(inner){
+function shell(inner, cls, bar){
   const ro = READONLY;
   return `<div class="app">
     <header class="top">
@@ -412,18 +432,21 @@ function shell(inner){
         ${ro?`<span class="sw">${esc(AUDIT.owner||'')}</span>`:`<span class="sw">${t('change')}</span>`}
       </div>
       <div class="spacer"></div>
-      ${ro?'':`<div class="saving" id="saving"><i></i>${t('saved')}</div>`}
+      ${ro?'':`<div class="saving" id="saving"><i></i><span class="lbl">${t('saved')}</span></div>`}
+      ${ro?'':`<button class="btn sm ghost tour-start help" title="${esc(t('howTo'))}" aria-label="${esc(t('howTo'))}">?</button>`}
       ${langSwitch()}
       <div class="userbox"><span class="av">${esc((SESSION.label||'?').trim().charAt(0).toUpperCase())}</span><span class="nm">${esc(SESSION.label)}</span>
-        <button class="btn sm ghost" id="lo">${t('logout')}</button></div>
+        <button class="btn sm ghost" id="lo" title="${esc(t('logout'))}">${IC.out}<span class="lbl">${t('logout')}</span></button></div>
     </header>
-    <main class="page">${inner}</main>
+    <main class="page ${cls||''} ${bar?'hasbar':''}">${inner}</main>
+    ${bar?`<nav class="mbar">${bar}</nav>`:''}
   </div>`;
 }
 function bindShell(){
   bindLang();
   document.getElementById('lo').onclick = () => signOut();
   document.getElementById('cchip').onclick = () => { if (READONLY){ go('admin'); } else go('country'); };
+  ROOT.querySelectorAll('.mbar [data-go]').forEach(b => b.onclick = () => go(b.dataset.go));
   const sv = document.getElementById('saving');
   if (sv){ setSaveState(saveState); sv.onclick = () => { if (saveState==='fail'){ setSaveState('busy'); flush(); } }; }
 }
@@ -477,6 +500,7 @@ function renderMap(){
       <div class="cons"><b>${p.consumers}</b><span>${t('consumersLabel')}</span></div>
       <h3>${L(p.short)}</h3>
       <ul class="top3">${L(p.top3).map(x=>`<li>${x}</li>`).join('')}</ul>
+      <div class="cgate"><span class="cgl">${L(p.side.gate)[0]}</span>${L(p.side.gate)[1]}</div>
       ${tally}
     </div>`;
   }).join('');
@@ -492,9 +516,12 @@ function renderMap(){
         <button class="btn sm" id="csv">${IC.dl}${t('exportCsv')}</button>
         ${READONLY?'':`<button class="btn sm primary finish-btn">${IC.check}${t('finish')}</button>`}
       </span>
-    </div>`);
+    </div>`, 'fill', READONLY
+      ? `<button class="btn" data-go="admin">${t('adminBackOv')}</button><button class="btn" data-go="gaps">${t('gaps')}</button>`
+      : `<button class="btn" data-go="gaps">${t('gaps')}</button><button class="btn primary finish-btn">${IC.check}${t('finishShort')}</button>`);
   bindShell();
   bindFinish();
+  const segOn = ROOT.querySelector('#seg button.on'); if (segOn && isMobile()) segOn.scrollIntoView({inline:'center', block:'nearest'});
   ROOT.querySelectorAll('.st').forEach(el=>el.onclick=()=>{ CUR_PHASE=+el.dataset.i; go('phase'); });
   ROOT.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>setStage(+b.dataset.s));
   const ti = document.getElementById('turnIn');
@@ -557,8 +584,13 @@ function renderPhase(){
   }
   side += `<div class="gate"><div class="gl">${g[0]}</div><p>${g[1]}</p></div>`;
 
+  const mob = isMobile();
+  const mbar = `<button class="btn" data-go="map">${t('back')}</button>
+      <button class="btn icon" id="mPrev" ${i>0?'':'disabled'} aria-label="${esc(t('prev'))}">‹</button>
+      <span class="msum" id="mSum">${t('stageN',{n:st})}</span>
+      <button class="btn icon" id="mNext" ${i<PHASES.length-1?'':'disabled'} aria-label="${esc(t('next'))}">›</button>`;
   ROOT.innerHTML = shell(`
-    <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+    <div class="backrow" style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <button class="btn" id="back">${t('back')}</button>
     </div>
     <section class="ph">
@@ -586,14 +618,16 @@ function renderPhase(){
         </div>
         <aside class="ph-side">
           ${ahead?'':`<div class="ph-summary" id="phSum"></div>`}
-          ${side}
+          ${mob ? `<details class="sdet"><summary>${t('aboutStage')}${IC.chev}</summary>${side}</details>` : side}
         </aside>
       </div>
-    </section>`);
+    </section>`, '', mbar);
   bindShell();
   document.getElementById('back').onclick = () => go('map');
   const pv = document.getElementById('prev'); if (pv) pv.onclick = () => { CUR_PHASE--; go('phase'); };
   const nx = document.getElementById('next'); if (nx) nx.onclick = () => { CUR_PHASE++; go('phase'); };
+  const mp = document.getElementById('mPrev'); if (mp) mp.onclick = () => { if (CUR_PHASE>0){ CUR_PHASE--; go('phase'); } };
+  const mn = document.getElementById('mNext'); if (mn) mn.onclick = () => { if (CUR_PHASE<PHASES.length-1){ CUR_PHASE++; go('phase'); } };
   bindFinish();
   updatePhaseCounts();
 
@@ -679,6 +713,9 @@ function updatePhaseCounts(){
   const cB = document.getElementById('cntB'), cL = document.getElementById('cntL');
   if (cB) cB.textContent = `${count('build',bl)}/${bl}`;
   if (cL) cL.textContent = `${count('leader',ll)}/${ll}`;
+  const ms = document.getElementById('mSum');
+  if (ms){ const tl = phaseTally(i);
+    ms.innerHTML = st > AUDIT.stage ? `${t('stageN',{n:st})} · ${t('ahead')}` : `${t('stageN',{n:st})}<span><b class="y">✓${tl.y}</b><b class="n">✗${tl.n}</b><b class="o">${tl.open}</b></span>`; }
   const ps = document.getElementById('phSum');
   if (ps){ const tl = phaseTally(i);
     ps.innerHTML = `<span class="t-yes">✓ ${t('yes')}: ${tl.y}</span><span class="t-no">✗ ${t('no')}: ${tl.n}</span><span class="t-open">${tl.open} ${t('open_')}</span>`; }
@@ -704,7 +741,7 @@ function renderGaps(){
         ${READONLY?'':`<button class="btn sm primary finish-btn">${IC.check}${t('finish')}</button>`}</span></div>
       ${open?`<div class="notice">${t('unanswered',{n:open})}</div>`:''}
       ${any?html:`<div class="okmsg">${t('noGaps')}</div>`}
-    </section>`);
+    </section>`, '', `<button class="btn" data-go="map">${t('back')}</button>${READONLY?'':`<button class="btn primary finish-btn">${IC.check}${t('finishShort')}</button>`}`);
   bindShell();
   document.getElementById('back').onclick = () => go('map');
   document.getElementById('csv').onclick = exportCsv;
@@ -798,18 +835,18 @@ async function adminOverview(){
   const rows = await rpc('ca_admin_overview',{p_token:SESSION.token});
   const el = document.getElementById('apanel'); if (!el) return;
   if (!rows.length){ el.innerHTML = `<div class="empty">${t('noAudits')}</div>`; return; }
-  el.innerHTML = `<div class="tblwrap"><table class="tbl"><thead><tr>
+  el.innerHTML = `<div class="tblwrap"><table class="tbl cards"><thead><tr>
       <th>${t('colOwner')}</th><th>${t('colCountry')}</th><th>${t('colStage')}</th><th class="num">${t('colTurnover')}</th>
       <th class="num">✓ ${t('yes')}</th><th class="num">✗ ${t('no')}</th><th class="num">${t('open_')}</th><th>${t('colStatus')}</th><th>${t('colUpd')}</th><th></th></tr></thead>
     <tbody>${rows.map(r=>{ const tot=totalItems(r.stage);
-      return `<tr><td>${esc(r.label)}</td><td class="country">${esc(r.country)}</td>
-        <td>${r.stage} · ${esc(stageShort(r.stage-1))}</td>
-        <td class="num" style="white-space:nowrap">${r.turnover!=null?'€ '+esc(fmtMoney(r.turnover)):'—'}</td>
-        <td class="num"><span class="t-yes" style="padding:2px 7px;border-radius:5px">${r.yes}</span></td>
-        <td class="num"><span class="t-no" style="padding:2px 7px;border-radius:5px">${r.no}</span></td>
-        <td class="num">${tot-r.yes-r.no}</td>
-        <td>${r.completed_at?`<span class="st-done">${esc(t('done',{d:fmtDate(r.completed_at)}))}</span>`:`<span class="st-work">${t('inWork')}</span>`}</td>
-        <td style="white-space:nowrap;color:var(--muted)">${fmtDate(r.updated_at)}</td>
+      return `<tr><td data-l="${esc(t('colOwner'))}">${esc(r.label)}</td><td class="country">${esc(r.country)}</td>
+        <td data-l="${esc(t('colStage'))}">${r.stage} · ${esc(stageShort(r.stage-1))}</td>
+        <td class="num" data-l="${esc(t('colTurnover'))}" style="white-space:nowrap">${r.turnover!=null?'€ '+esc(fmtMoney(r.turnover)):'—'}</td>
+        <td class="num" data-l="✓ ${esc(t('yes'))}"><span class="t-yes" style="padding:2px 7px;border-radius:5px">${r.yes}</span></td>
+        <td class="num" data-l="✗ ${esc(t('no'))}"><span class="t-no" style="padding:2px 7px;border-radius:5px">${r.no}</span></td>
+        <td class="num" data-l="${esc(t('open_'))}">${tot-r.yes-r.no}</td>
+        <td data-l="${esc(t('colStatus'))}">${r.completed_at?`<span class="st-done">${esc(t('done',{d:fmtDate(r.completed_at)}))}</span>`:`<span class="st-work">${t('inWork')}</span>`}</td>
+        <td data-l="${esc(t('colUpd'))}" style="white-space:nowrap;color:var(--muted)">${fmtDate(r.updated_at)}</td>
         <td><div class="acts"><button class="btn sm" data-id="${r.id}">${t('view')}</button></div></td></tr>`; }).join('')}
     </tbody></table></div>`;
   el.querySelectorAll('button[data-id]').forEach(b=>b.onclick=async()=>{
@@ -843,7 +880,7 @@ async function adminReport(){
       <select class="input" id="repOwner"><option value="">${t('filterAll')}</option>${owners.map(o=>`<option ${o===REP_OWNER?'selected':''}>${esc(o)}</option>`).join('')}</select>
       <input class="input" id="repQ" placeholder="${esc(t('search'))}" value="${esc(REP_Q)}">
     </div>
-    <div class="tblwrap"><table class="tbl rep"><thead><tr>
+    <div class="tblwrap"><table class="tbl rep cards"><thead><tr>
       <th>${t('colCountry')}</th><th class="num">${t('colTurnover')}</th>
       <th>${t('colYesItems')}</th><th>${t('colNoItems')}</th><th>${t('colComments')}</th></tr></thead>
       <tbody id="repBody"></tbody></table></div>`;
@@ -858,10 +895,10 @@ async function adminReport(){
           <div class="sub">${t('stageN',{n:r.stage})} · ${esc(stageShort(r.stage-1))}</div>
           <div style="margin-top:6px">${r.completed_at?`<span class="st-done">${esc(t('done',{d:fmtDate(r.completed_at)}))}</span>`:`<span class="st-work">${t('inWork')}</span>`}</div>
           ${d.open?`<div class="sub" style="margin-top:4px">${d.open} ${t('open_')}</div>`:''}</td>
-        <td class="num rt">${r.turnover!=null?'€ '+esc(fmtMoney(r.turnover)):'—'}</td>
-        <td><div class="cnt-h t-yes">✓ ${d.yes.length}</div>${li(d.yes,'y')}</td>
-        <td><div class="cnt-h t-no">✗ ${d.no.length}</div>${li(d.no,'n')}</td>
-        <td>${cms}</td></tr>`;
+        <td class="num rt" data-l="${esc(t('colTurnover'))}">${r.turnover!=null?'€ '+esc(fmtMoney(r.turnover)):'—'}</td>
+        <td data-l="${esc(t('colYesItems'))}"><details class="rdet" ${isMobile()?'':'open'}><summary><span class="cnt-h t-yes">✓ ${d.yes.length}</span></summary>${li(d.yes,'y')}</details></td>
+        <td data-l="${esc(t('colNoItems'))}"><details class="rdet" open><summary><span class="cnt-h t-no">✗ ${d.no.length}</span></summary>${li(d.no,'n')}</details></td>
+        <td data-l="${esc(t('colComments'))}">${cms}</td></tr>`;
     }).join('') : `<tr><td colspan="5"><div class="empty">${t('noRows')}</div></td></tr>`;
   };
   draw();
@@ -898,9 +935,9 @@ async function adminUsers(){
       <label class="chkl"><input type="checkbox" id="ua"> ${t('isAdmin')}</label>
       <button class="btn primary" type="submit" style="margin-bottom:2px">${t('addUser')}</button>
     </form>
-    <div class="tblwrap"><table class="tbl"><thead><tr><th>${t('colName')}</th><th class="num">${t('colCountries')}</th><th></th></tr></thead>
-    <tbody>${users.map(u=>`<tr><td>${esc(u.label)} ${u.is_admin?`<span class="badge">${t('isAdmin')}</span>`:''}</td>
-      <td class="num">${u.countries}</td>
+    <div class="tblwrap"><table class="tbl cards"><thead><tr><th>${t('colName')}</th><th class="num">${t('colCountries')}</th><th></th></tr></thead>
+    <tbody>${users.map(u=>`<tr><td class="country">${esc(u.label)} ${u.is_admin?`<span class="badge">${t('isAdmin')}</span>`:''}</td>
+      <td class="num" data-l="${esc(t('colCountries'))}">${u.countries}</td>
       <td><div class="acts"><button class="btn sm" data-pw="${u.id}" data-n="${esc(u.label)}" data-a="${u.is_admin}">${t('setPass')}</button>
         <button class="btn sm danger" data-del="${u.id}" data-n="${esc(u.label)}">${t('del')}</button></div></td></tr>`).join('')}
     </tbody></table></div>`;

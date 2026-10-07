@@ -1,0 +1,16 @@
+{
+  "name": "Coral Club — Аудит стран",
+  "short_name": "CCI Audit",
+  "description": "Аудит стран по карте экспансии Coral Club",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f2ea",
+  "theme_color": "#f5f2ea",
+  "lang": "ru",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
