@@ -554,6 +554,30 @@ button,.st,.citem,.chk li{-webkit-tap-highlight-color:transparent}
 .btn.help{width:32px;height:32px;padding:0;justify-content:center;border-radius:50%;font-size:14px;font-weight:700}
 @media (max-width:700px){ .btn.help{width:34px;height:34px;flex:none} .tour-card p{font-size:14px} }
 @media (prefers-reduced-motion:reduce){ .tour-hole{animation:none;transition:none} .tour-card{transition:none} }
+
+/* ---------- admin deletion ---------- */
+.deltools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.selall{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--ink-2);cursor:pointer;user-select:none}
+.selall input,.rowck{width:17px;height:17px;accent-color:var(--no);cursor:pointer}
+.selcnt{font-size:12.5px;font-weight:600;color:var(--no)}
+.btn.danger{color:var(--no);border-color:var(--no-line)}
+.btn.danger:hover{background:var(--no-soft);border-color:var(--no);color:var(--no)}
+.btn.danger:disabled{color:var(--muted);border-color:var(--line-2);background:transparent}
+.btn.danger svg{width:13px;height:13px}
+.btn.icon-only{padding:6px 8px}
+.ovr th.ck,.ovr td.ck{width:1%;padding-right:0}
+.ovr tr.picked td{background:var(--no-soft)}
+@media (max-width:700px){
+  .deltools{gap:8px}
+  .deltools .btn{min-height:40px}
+  table.cards tr{position:relative}
+  table.cards td.ck{position:absolute;top:10px;right:12px;width:auto;padding:0}
+  table.cards td.ck .rowck{width:22px;height:22px}
+  table.ovr td.ck + td{padding-right:40px}
+  table.cards tr.picked{border-color:var(--no-line);background:var(--no-soft)}
+  table.cards tr.picked td{background:transparent}
+  table.cards .acts .btn.icon-only{min-width:44px;justify-content:center}
+}
 </style>
 </head>
 <body>

@@ -133,6 +133,22 @@ const S = {
   limitReached:{ru:'Достигнут предел в {m} стран. Откройте страну из списка или удалите ненужную.',en:'Limit of {m} countries reached. Open one from the list or delete one you no longer need.'},
   E_LIMIT_30:{ru:'Достигнут предел в 30 стран.',en:'Limit of 30 countries reached.'},
   colStatus:{ru:'Статус',en:'Status'},
+  selected:{ru:'Выбрано: {n}',en:'Selected: {n}'},
+  delSelected:{ru:'Удалить выбранные',en:'Delete selected'},
+  delAll:{ru:'Удалить все данные',en:'Delete all data'},
+  selAll:{ru:'Выбрать все',en:'Select all'},
+  delOneAsk:{ru:'Удалить страну «{c}» руководителя {o} вместе со всеми отметками и комментариями?\n\nЭто нельзя отменить.',
+             en:'Delete “{c}” of {o} with all answers and comments?\n\nThis cannot be undone.'},
+  delManyAsk:{ru:'Удалить выбранные страны ({n}) вместе со всеми отметками и комментариями?\n\nЭто нельзя отменить.',
+              en:'Delete the selected countries ({n}) with all answers and comments?\n\nThis cannot be undone.'},
+  delAllAsk:{ru:'Будут удалены ВСЕ страны всех руководителей ({n}) со всеми отметками и комментариями. Руководители и пароли останутся.\n\nЧтобы подтвердить, введите слово УДАЛИТЬ',
+             en:'ALL countries of all division heads ({n}) will be deleted with every answer and comment. Division heads and passwords stay.\n\nTo confirm, type DELETE'},
+  delAllWord:{ru:'УДАЛИТЬ',en:'DELETE'},
+  deleted:{ru:'Удалено стран: {n}',en:'Countries deleted: {n}'},
+  delNotInstalled:{ru:'Удаление ещё не включено в базе: выполните supabase/005_admin_delete.sql в Supabase → SQL Editor.',
+                   en:'Deletion is not enabled in the database yet: run supabase/005_admin_delete.sql in Supabase → SQL Editor.'},
+  auditGone:{ru:'Эту страну удалил администратор. Последние изменения не сохранены — откройте страну заново.',
+             en:'This country was deleted by the administrator. Recent changes were not saved — open the country again.'},
   turnover:{ru:'Товарооборот, € / мес',en:'Turnover, € / month'},
   turnoverPh:{ru:'напр. 52 000',en:'e.g. 52,000'},
   colTurnover:{ru:'Товарооборот',en:'Turnover'},
@@ -250,17 +266,30 @@ function queueSave(k, payload, delay){
 let flushing = false;
 async function flush(){
   if (flushing) return; flushing = true;
-  let failed = false;
+  let failed = false, gone = false;
   try {
     while (PENDING.size){
       const [k, p] = PENDING.entries().next().value;
       PENDING.delete(k);
       try { await rpc(p.fn, p.args); }
-      catch(e){ failed = true; if(!PENDING.has(k)) PENDING.set(k,p); break; }
+      catch(e){
+        if (e.message === 'NOT_FOUND'){ gone = true; break; }
+        failed = true; if(!PENDING.has(k)) PENDING.set(k,p); break;
+      }
     }
   } finally { flushing = false; }
+  if (gone){ auditGone(); return; }
   setSaveState(failed ? 'fail' : (PENDING.size ? 'busy' : 'ok'));
   if (failed) toast(t('netErr'));
+}
+// the country was deleted (by the admin) while this person was filling it in
+function auditGone(){
+  TIMERS.forEach(tm => clearTimeout(tm)); TIMERS.clear(); PENDING.clear();
+  saveState = 'ok';
+  if (READONLY) return;
+  AUDIT = null; ANS = {}; CUR_PHASE = 0; LAST_FINISH = null;
+  alert(t('auditGone'));
+  go('country');
 }
 async function flushAll(){
   TIMERS.forEach(tm => clearTimeout(tm)); TIMERS.clear();
@@ -837,6 +866,7 @@ async function finishAudit(btn){
     toast(err.message==='SAVE' ? t('finishSaveFail') : errText(err));
     btns.forEach(b=>{ b.disabled = false; if (b.dataset.l) b.innerHTML = b.dataset.l; });
     if (err.message==='METRICS_REQUIRED'){ if (VIEW!=='map') go('map'); flagMissingMetrics(METRICS); }
+    if (err.message==='NOT_FOUND') auditGone();
   }
   void btn;
 }
@@ -897,12 +927,20 @@ async function adminOverview(){
   const rows = await rpc('ca_admin_overview',{p_token:SESSION.token});
   const el = document.getElementById('apanel'); if (!el) return;
   if (!rows.length){ el.innerHTML = `<div class="empty">${t('noAudits')}</div>`; return; }
-  el.innerHTML = `<div class="tblwrap"><table class="tbl cards"><thead><tr>
-      <th>${t('colOwner')}</th><th>${t('colCountry')}</th><th>${t('colStage')}</th><th class="num">${t('colTurnover')}</th>
+  el.innerHTML = `<div class="deltools">
+      <label class="selall"><input type="checkbox" id="selAll"> ${t('selAll')}</label>
+      <span class="selcnt" id="selCnt"></span>
+      <button class="btn sm danger" id="delSel" disabled>${IC.trash}${t('delSelected')}</button>
+      <span style="flex:1"></span>
+      <button class="btn sm danger" id="delAll">${IC.trash}${t('delAll')}</button>
+    </div>
+    <div class="tblwrap"><table class="tbl cards ovr"><thead><tr>
+      <th class="ck"></th><th>${t('colOwner')}</th><th>${t('colCountry')}</th><th>${t('colStage')}</th><th class="num">${t('colTurnover')}</th>
       <th class="num">${t('colPS')}</th><th class="num" title="${esc(t('colDDFull'))}">${t('colDD')}</th>
       <th class="num">✓ ${t('yes')}</th><th class="num">✗ ${t('no')}</th><th class="num">${t('open_')}</th><th>${t('colStatus')}</th><th>${t('colUpd')}</th><th></th></tr></thead>
     <tbody>${rows.map(r=>{ const tot=totalItems(r.stage);
-      return `<tr><td data-l="${esc(t('colOwner'))}">${esc(r.label)}</td><td class="country">${esc(r.country)}</td>
+      return `<tr data-id="${r.id}"><td class="ck"><input type="checkbox" class="rowck" value="${r.id}" aria-label="${esc(r.country)}"></td>
+        <td data-l="${esc(t('colOwner'))}">${esc(r.label)}</td><td class="country">${esc(r.country)}</td>
         <td data-l="${esc(t('colStage'))}">${r.stage} · ${esc(stageShort(r.stage-1))}</td>
         <td class="num" data-l="${esc(t('colTurnover'))}" style="white-space:nowrap">${r.turnover!=null?'€ '+esc(fmtMoney(r.turnover)):'—'}</td>
         <td class="num" data-l="${esc(t('colPS'))}">${r.parallel_structures??'—'}</td>
@@ -912,12 +950,44 @@ async function adminOverview(){
         <td class="num" data-l="${esc(t('open_'))}">${tot-r.yes-r.no}</td>
         <td data-l="${esc(t('colStatus'))}">${r.completed_at?`<span class="st-done">${esc(t('done',{d:fmtDate(r.completed_at)}))}</span>`:`<span class="st-work">${t('inWork')}</span>`}</td>
         <td data-l="${esc(t('colUpd'))}" style="white-space:nowrap;color:var(--muted)">${fmtDate(r.updated_at)}</td>
-        <td><div class="acts"><button class="btn sm" data-id="${r.id}">${t('view')}</button></div></td></tr>`; }).join('')}
+        <td><div class="acts"><button class="btn sm" data-id="${r.id}">${t('view')}</button>
+          <button class="btn sm danger icon-only" data-del="${r.id}" data-c="${esc(r.country)}" data-o="${esc(r.label)}" title="${esc(t('del'))}" aria-label="${esc(t('del'))}">${IC.trash}</button></div></td></tr>`; }).join('')}
     </tbody></table></div>`;
   el.querySelectorAll('button[data-id]').forEach(b=>b.onclick=async()=>{
     try { const a = await rpc('ca_admin_audit',{p_token:SESSION.token,p_audit:b.dataset.id}); loadAudit(a); READONLY=true; go('map'); }
     catch(err){ toast(errText(err)); }
   });
+  // ---- deletion ----
+  const cks = [...el.querySelectorAll('.rowck')], selAll = el.querySelector('#selAll');
+  const picked = () => cks.filter(c=>c.checked).map(c=>c.value);
+  const sync = () => {
+    const n = picked().length;
+    el.querySelector('#selCnt').textContent = n ? t('selected',{n}) : '';
+    el.querySelector('#delSel').disabled = !n;
+    selAll.checked = n && n === cks.length; selAll.indeterminate = n > 0 && n < cks.length;
+    cks.forEach(c => c.closest('tr').classList.toggle('picked', c.checked));
+  };
+  cks.forEach(c => c.onchange = sync);
+  selAll.onchange = () => { cks.forEach(c => c.checked = selAll.checked); sync(); };
+  const doDelete = async (ids) => {
+    try {
+      const n = await rpc('ca_admin_delete_audits', {p_token:SESSION.token, p_ids:ids});
+      toast(t('deleted',{n}));
+      await adminOverview();
+    } catch(err){
+      toast(/ca_admin_delete_audits|Could not find the function|PGRST202/i.test(err.message) ? t('delNotInstalled') : errText(err));
+    }
+  };
+  el.querySelectorAll('button[data-del]').forEach(b => b.onclick = () => {
+    if (confirm(t('delOneAsk',{c:b.dataset.c, o:b.dataset.o}))) doDelete([b.dataset.del]);
+  });
+  el.querySelector('#delSel').onclick = () => { const ids = picked(); if (ids.length && confirm(t('delManyAsk',{n:ids.length}))) doDelete(ids); };
+  el.querySelector('#delAll').onclick = () => {
+    const w = prompt(t('delAllAsk',{n:rows.length}), '');
+    if (w === null) return;
+    if (w.trim().toUpperCase() !== t('delAllWord')){ toast(t('delAllWord') + '?'); return; }
+    doDelete(rows.map(r=>r.id));
+  };
 }
 /* ---- summary table: country · turnover · yes · no · comments ---- */
 let REPORT = [], REP_OWNER = '', REP_Q = '';
