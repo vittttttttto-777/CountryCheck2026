@@ -97,13 +97,22 @@ b{font-weight:600}
 .stagebar .row1>div:first-child{flex:1 1 320px;min-width:0}
 .stagebar .row1{flex-wrap:nowrap}
 @media (max-width:1100px){.stagebar .row1{flex-wrap:wrap}}
-.turn{display:flex;flex-direction:column;gap:3px}
-.turn span{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
-.turn .input{width:160px;padding:8px 11px;font-size:14px;font-variant-numeric:tabular-nums}
+.metrics{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap;margin:0 0 12px}
+.turn{display:flex;flex-direction:column;gap:4px;width:clamp(240px,16.5vw,300px)}
+.turn span{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700;white-space:nowrap}
+.turn .req{font-style:normal;color:var(--coral);margin-left:3px}
+.turn .input{width:100%;padding:8px 11px;font-size:15px;font-variant-numeric:tabular-nums}
+.turn.unset .input{background:#fffaf2;border-color:#e8c98f}
+.turn.need .input,.turn.bad .input{border-color:var(--no);background:var(--no-soft);box-shadow:0 0 0 3px rgba(196,69,42,.12)}
+.turn .ferr{font-style:normal;font-size:11px;font-weight:600;color:var(--no);min-height:0;line-height:1.2}
+.turn .ferr:empty{display:none}
+.mhint{align-self:center;font-size:11.5px;color:var(--muted);padding-top:16px}
+.citem .miss{color:var(--gold-ink);font-weight:600}
 .repfilters{display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap}
 .repfilters .input{width:auto;min-width:220px;padding:9px 12px;font-size:13.5px}
 table.rep td{vertical-align:top}
-.rep th:nth-child(3),.rep th:nth-child(4),.rep th:nth-child(5){min-width:260px}
+.rep th:nth-child(5),.rep th:nth-child(6),.rep th:nth-child(7){min-width:260px}
+.rep th:nth-child(2),.rep th:nth-child(3),.rep th:nth-child(4){width:1%;white-space:nowrap}
 .rep .rc{min-width:170px}
 .rep .rc .sub{font-size:12px;color:var(--muted);margin-top:2px}
 .rep .rt{font-weight:600;white-space:nowrap;font-size:14px}
@@ -422,7 +431,12 @@ button,.st,.citem,.chk li{-webkit-tap-highlight-color:transparent}
   .stagebar p{display:none}
   .row1r{display:grid;grid-template-columns:1fr;gap:10px}
   .row1r .finish-btn{display:none}
-  .turn .input{width:100%}
+  .metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+  .turn{width:auto;min-width:0}
+  .turn[data-f="turnover"]{grid-column:1/-1}
+  .turn span{white-space:normal;line-height:1.25;min-height:2.5em;display:flex;align-items:flex-end}
+  .turn[data-f="turnover"] span{min-height:0}
+  .mhint{grid-column:1/-1;padding-top:0}
   .overall{justify-content:space-between}
   .obar{flex:1;width:auto}
   /* stage picker becomes a swipeable strip */
@@ -516,7 +530,7 @@ button,.st,.citem,.chk li{-webkit-tap-highlight-color:transparent}
   table.rep td[data-l]::before{display:block;margin-bottom:4px}
   table.rep td.rt[data-l]{display:flex}
   table.rep td.rt[data-l]::before{margin:0}
-  .rep th:nth-child(3),.rep th:nth-child(4),.rep th:nth-child(5){min-width:0}
+  .rep th:nth-child(5),.rep th:nth-child(6),.rep th:nth-child(7){min-width:0}
   .rl{max-height:none}
   .rdet>summary{margin-bottom:4px}
   .rdet:not([open])>summary::after{content:' ▾';font-size:12px;color:var(--muted)}

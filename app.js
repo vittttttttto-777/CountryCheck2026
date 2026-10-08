@@ -136,6 +136,22 @@ const S = {
   turnover:{ru:'Товарооборот, € / мес',en:'Turnover, € / month'},
   turnoverPh:{ru:'напр. 52 000',en:'e.g. 52,000'},
   colTurnover:{ru:'Товарооборот',en:'Turnover'},
+  psLabel:{ru:'Число параллельных структур',en:'Parallel structures'},
+  ddLabel:{ru:'Лидеры Diamond Director и выше',en:'Diamond Director+ leaders'},
+  countPh:{ru:'напр. 4',en:'e.g. 4'},
+  metricsHint:{ru:'* обязательно для завершения аудита',en:'* required to complete the audit'},
+  fieldReq:{ru:'Заполните, чтобы завершить аудит',en:'Fill in to complete the audit'},
+  badInt:{ru:'Только целое число от 0',en:'Whole number from 0 only'},
+  badMoney:{ru:'Только число от 0',en:'Number from 0 only'},
+  needMetrics:{ru:'Сначала заполните обязательные поля: {f}',en:'Fill in the required fields first: {f}'},
+  metricsMissing:{ru:'показатели не заполнены',en:'metrics missing'},
+  colPS:{ru:'Параллельных структур',en:'Parallel structures'},
+  colDD:{ru:'Лидеров DD+',en:'DD+ leaders'},
+  colDDFull:{ru:'Лидеры уровня Diamond Director и выше',en:'Leaders at Diamond Director level and above'},
+  psShort:{ru:'{n} парал. структ.',en:'{n} parallel'},
+  ddShort:{ru:'{n} DD+',en:'{n} DD+'},
+  E_METRICS_REQUIRED:{ru:'Заполните товарооборот, число параллельных структур и лидеров Diamond Director и выше.',en:'Fill in turnover, parallel structures and Diamond Director+ leaders.'},
+  E_BAD_VALUE:{ru:'Недопустимое значение.',en:'Invalid value.'},
   tabReport:{ru:'Сводная таблица',en:'Summary table'},
   reportP:{ru:'Все страны всех руководителей: товарооборот и ответы по чек-листу на стадиях до текущей включительно.',
            en:'All countries of all division heads: turnover and checklist answers for stages up to the current one.'},
@@ -147,10 +163,10 @@ const S = {
   noRows:{ru:'Нет данных',en:'No data'},
   exportXls:{ru:'Выгрузить в Excel (CSV)',en:'Export to Excel (CSV)'},
   stShort:{ru:'С{n}',en:'S{n}'},
-  repHead:{ru:['Страна','Руководитель','Стадия','Товарооборот, €/мес','Статус','Есть, шт.','Нет, шт.','Не отмечено, шт.','Чек-лист: есть','Чек-лист: нет','Комментарии'],
-           en:['Country','Division head','Stage','Turnover, €/mo','Status','Yes, #','No, #','Open, #','Checklist: yes','Checklist: no','Comments']},
-  csvHead:{ru:['Руководитель','Страна','Текущая стадия','Стадия','Раздел','№','Пункт','Статус','Комментарий'],
-           en:['Division head','Country','Current stage','Stage','Section','#','Item','Status','Comment']},
+  repHead:{ru:['Страна','Руководитель','Стадия','Товарооборот, €/мес','Параллельных структур','Лидеров Diamond Director+','Статус','Есть, шт.','Нет, шт.','Не отмечено, шт.','Чек-лист: есть','Чек-лист: нет','Комментарии'],
+           en:['Country','Division head','Stage','Turnover, €/mo','Parallel structures','Diamond Director+ leaders','Status','Yes, #','No, #','Open, #','Checklist: yes','Checklist: no','Comments']},
+  csvHead:{ru:['Руководитель','Страна','Текущая стадия','Товарооборот, €/мес','Параллельных структур','Лидеров Diamond Director+','Стадия','Раздел','№','Пункт','Статус','Комментарий'],
+           en:['Division head','Country','Current stage','Turnover, €/mo','Parallel structures','Diamond Director+ leaders','Stage','Section','#','Item','Status','Comment']},
 };
 
 /* ================= state ================= */
@@ -395,7 +411,10 @@ async function renderCountry(){
       const st = c.completed_at ? `<span class="st-done">${esc(t('done',{d:fmtDate(c.completed_at)}))}</span>` : `<span class="st-work">${t('inWork')}</span>`;
       return `<div class="citem" data-c="${esc(c.country)}">
         <div class="nm"><span class="nmt">${esc(c.country)}</span><div style="margin-top:3px">${st}</div></div>
-        <div class="meta">${t('stageN',{n:c.stage})} · ${esc(stageShort(c.stage-1))}<br>${t('answered',{a:done,t:tot})}${c.turnover!=null?` · € ${esc(fmtMoney(c.turnover))}`:''}</div>
+        <div class="meta">${t('stageN',{n:c.stage})} · ${esc(stageShort(c.stage-1))}<br>${t('answered',{a:done,t:tot})}${c.turnover!=null?` · € ${esc(fmtMoney(c.turnover))}`:''}
+          ${c.turnover==null||c.parallel_structures==null||c.dd_leaders==null
+            ? `<br><span class="miss">${t('metricsMissing')}</span>`
+            : `<br>${esc(t('psShort',{n:c.parallel_structures}))} · ${esc(t('ddShort',{n:c.dd_leaders}))}`}</div>
         <div class="mini"><i style="width:${pct}%"></i></div>
         <button class="del" data-id="${c.id}" data-n="${esc(c.country)}" title="${esc(t('del'))}">${IC.trash}</button>
       </div>`;
@@ -410,7 +429,8 @@ async function renderCountry(){
 }
 
 function loadAudit(a){
-  AUDIT = {id:a.id, country:a.country, stage:a.stage, turnover:a.turnover, define_text:a.define_text||'', owner:a.owner, completed_at:a.completed_at};
+  AUDIT = {id:a.id, country:a.country, stage:a.stage, turnover:a.turnover,
+    parallel_structures:a.parallel_structures, dd_leaders:a.dd_leaders, _bad:{}, define_text:a.define_text||'', owner:a.owner, completed_at:a.completed_at};
   ANS = {};
   (a.items||[]).forEach(it=>{ ANS[key(it.phase,it.section,it.idx)] = {status:it.status, comment:it.comment||''}; });
 }
@@ -459,19 +479,63 @@ function stageBar(){
     <div class="row1">
       <div><h2>${t('whereH')}</h2><p>${t('whereP')}</p></div>
       <div class="row1r">
-        <label class="turn"><span>${t('turnover')}</span>
-          <input class="input" id="turnIn" inputmode="decimal" placeholder="${esc(t('turnoverPh'))}" value="${AUDIT.turnover!=null?esc(fmtMoney(AUDIT.turnover)):''}" ${READONLY?'disabled':''}></label>
         <div class="overall"><span>${t('overall',{n:AUDIT.stage})}</span>
           <div class="obar"><i class="y" style="width:${pctY}%"></i><i class="n" style="width:${pctN}%"></i></div>
           <b>${ov.y+ov.n}/${ov.total}</b></div>
         ${READONLY?'':`<button class="btn primary finish-btn">${IC.check}${t('finish')}</button>`}
       </div>
     </div>
+    ${metricsBlock()}
     <div class="seg" id="seg">${PHASES.map((p,i)=>`
       <button data-s="${i+1}" class="${i+1===AUDIT.stage?'on':i+1<AUDIT.stage?'past':''}" ${READONLY?'disabled':''}>
         <span class="n">${t('stageN',{n:i+1})}</span><span class="r">${p.rev}</span><span class="s">${esc(stageShort(i))}</span>
       </button>`).join('')}</div>
   </section>`;
+}
+const METRICS = [
+  {f:'turnover', lbl:'turnover', ph:'turnoverPh', money:true, id:'turnIn'},
+  {f:'parallel_structures', lbl:'psLabel', ph:'countPh'},
+  {f:'dd_leaders', lbl:'ddLabel', ph:'countPh'}
+];
+function fmtMetric(m, v){ return v==null ? '' : (m.money ? fmtMoney(v) : String(v)); }
+function metricsBlock(){
+  return `<div class="metrics">${METRICS.map(m=>`
+      <label class="turn${AUDIT[m.f]==null&&!READONLY?' unset':''}" data-f="${m.f}"><span>${t(m.lbl)}${READONLY?'':'<i class="req">*</i>'}</span>
+        <input class="input" ${m.id?`id="${m.id}"`:''} data-f="${m.f}" inputmode="${m.money?'decimal':'numeric'}" ${m.money?'':'pattern="[0-9]*"'} autocomplete="off"
+          placeholder="${esc(t(m.ph))}" value="${esc(fmtMetric(m, AUDIT[m.f]))}" ${READONLY?'disabled':''}>
+        <em class="ferr"></em></label>`).join('')}
+      ${READONLY?'':`<div class="mhint">${t('metricsHint')}</div>`}
+    </div>`;
+}
+function bindMetrics(){
+  if (READONLY) return;
+  ROOT.querySelectorAll('.metrics input[data-f]').forEach(inp => {
+    const m = METRICS.find(x=>x.f===inp.dataset.f), box = inp.closest('.turn'), err = box.querySelector('.ferr');
+    inp.addEventListener('input', () => {
+      const raw = inp.value.replace(/[\s\u00a0€]/g,'').replace(',', '.');
+      const v = raw === '' ? null : Number(raw);
+      const bad = raw !== '' && (!isFinite(v) || v < 0 || (!m.money && !Number.isInteger(v)));
+      AUDIT._bad[m.f] = bad;
+      box.classList.toggle('bad', bad);
+      box.classList.toggle('unset', !bad && v == null);
+      box.classList.remove('need');
+      err.textContent = bad ? t(m.money?'badMoney':'badInt') : '';
+      if (bad) return;
+      AUDIT[m.f] = v;
+      queueSave('m:'+m.f, {fn:'ca_set_metric', args:{p_token:SESSION.token, p_audit:AUDIT.id, p_field:m.f, p_value:v}}, 700);
+    });
+    inp.addEventListener('blur', () => { if (!AUDIT._bad[m.f] && AUDIT[m.f]!=null) inp.value = fmtMetric(m, AUDIT[m.f]); });
+  });
+}
+function missingMetrics(){ return METRICS.filter(m => AUDIT[m.f]==null || (AUDIT._bad && AUDIT._bad[m.f])); }
+function flagMissingMetrics(list){
+  list.forEach(m => {
+    const box = ROOT.querySelector(`.metrics .turn[data-f="${m.f}"]`); if (!box) return;
+    box.classList.add('need');
+    const e = box.querySelector('.ferr'); if (e && !AUDIT._bad[m.f]) e.textContent = t('fieldReq');
+  });
+  const first = ROOT.querySelector(`.metrics .turn[data-f="${list[0].f}"] input`);
+  if (first){ first.scrollIntoView({block:'center', behavior:'smooth'}); setTimeout(()=>first.focus({preventScroll:true}), 350); }
 }
 function mktBand(){
   const cells=[];
@@ -524,18 +588,7 @@ function renderMap(){
   const segOn = ROOT.querySelector('#seg button.on'); if (segOn && isMobile()) segOn.scrollIntoView({inline:'center', block:'nearest'});
   ROOT.querySelectorAll('.st').forEach(el=>el.onclick=()=>{ CUR_PHASE=+el.dataset.i; go('phase'); });
   ROOT.querySelectorAll('#seg button').forEach(b=>b.onclick=()=>setStage(+b.dataset.s));
-  const ti = document.getElementById('turnIn');
-  if (ti && !READONLY){
-    ti.addEventListener('input', () => {
-      const raw = ti.value.replace(/[\s €]/g,'').replace(',', '.');
-      const v = raw === '' ? null : Number(raw);
-      if (raw !== '' && (!isFinite(v) || v < 0)){ ti.style.borderColor='var(--no)'; return; }
-      ti.style.borderColor='';
-      AUDIT.turnover = v;
-      queueSave('turnover', {fn:'ca_set_turnover', args:{p_token:SESSION.token, p_audit:AUDIT.id, p_value:v}}, 700);
-    });
-    ti.addEventListener('blur', () => { if (AUDIT.turnover!=null) ti.value = fmtMoney(AUDIT.turnover); });
-  }
+  bindMetrics();
   document.getElementById('toGaps').onclick = () => go('gaps');
   document.getElementById('csv').onclick = exportCsv;
   const bo = document.getElementById('backOv'); if (bo) bo.onclick = () => go('admin');
@@ -752,6 +805,13 @@ function renderGaps(){
 function bindFinish(){ ROOT.querySelectorAll('.finish-btn').forEach(b => b.onclick = () => finishAudit(b)); }
 async function finishAudit(btn){
   if (READONLY || !AUDIT) return;
+  const miss = missingMetrics();
+  if (miss.length){
+    toast(t('needMetrics',{f: miss.map(m=>t(m.lbl).replace(/,.*$/,'')).join(', ')}));
+    if (VIEW !== 'map'){ go('map'); }
+    flagMissingMetrics(miss);
+    return;
+  }
   // what is still missing on stages 1..current
   let open = 0, noCmt = 0;
   for (let i=0;i<AUDIT.stage;i++){
@@ -776,6 +836,7 @@ async function finishAudit(btn){
   } catch(err){
     toast(err.message==='SAVE' ? t('finishSaveFail') : errText(err));
     btns.forEach(b=>{ b.disabled = false; if (b.dataset.l) b.innerHTML = b.dataset.l; });
+    if (err.message==='METRICS_REQUIRED'){ if (VIEW!=='map') go('map'); flagMissingMetrics(METRICS); }
   }
   void btn;
 }
@@ -790,7 +851,8 @@ function exportCsv(){
     phaseItems(i).forEach(it=>{
       const a = ANS[key(st,it.sec,it.idx)] || {};
       const status = st > AUDIT.stage ? (LANG==='ru'?'впереди':'ahead') : a.status==='yes' ? t('yes') : a.status==='no' ? t('no') : '';
-      rows.push([owner, AUDIT.country, AUDIT.stage, st, it.sec==='build'?t('buildLabel'):t('leaderLabel'), it.idx+1, strip(it.txt), status, a.comment||'']);
+      rows.push([owner, AUDIT.country, AUDIT.stage,
+        AUDIT.turnover!=null?Number(AUDIT.turnover):'', AUDIT.parallel_structures??'', AUDIT.dd_leaders??'', st, it.sec==='build'?t('buildLabel'):t('leaderLabel'), it.idx+1, strip(it.txt), status, a.comment||'']);
     });
   }
   const csv = '﻿' + rows.map(r=>r.map(v=>{ const s=String(v??''); return /[;"\n\r]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }).join(';')).join('\r\n');
@@ -837,11 +899,14 @@ async function adminOverview(){
   if (!rows.length){ el.innerHTML = `<div class="empty">${t('noAudits')}</div>`; return; }
   el.innerHTML = `<div class="tblwrap"><table class="tbl cards"><thead><tr>
       <th>${t('colOwner')}</th><th>${t('colCountry')}</th><th>${t('colStage')}</th><th class="num">${t('colTurnover')}</th>
+      <th class="num">${t('colPS')}</th><th class="num" title="${esc(t('colDDFull'))}">${t('colDD')}</th>
       <th class="num">✓ ${t('yes')}</th><th class="num">✗ ${t('no')}</th><th class="num">${t('open_')}</th><th>${t('colStatus')}</th><th>${t('colUpd')}</th><th></th></tr></thead>
     <tbody>${rows.map(r=>{ const tot=totalItems(r.stage);
       return `<tr><td data-l="${esc(t('colOwner'))}">${esc(r.label)}</td><td class="country">${esc(r.country)}</td>
         <td data-l="${esc(t('colStage'))}">${r.stage} · ${esc(stageShort(r.stage-1))}</td>
         <td class="num" data-l="${esc(t('colTurnover'))}" style="white-space:nowrap">${r.turnover!=null?'€ '+esc(fmtMoney(r.turnover)):'—'}</td>
+        <td class="num" data-l="${esc(t('colPS'))}">${r.parallel_structures??'—'}</td>
+        <td class="num" data-l="${esc(t('colDD'))}">${r.dd_leaders??'—'}</td>
         <td class="num" data-l="✓ ${esc(t('yes'))}"><span class="t-yes" style="padding:2px 7px;border-radius:5px">${r.yes}</span></td>
         <td class="num" data-l="✗ ${esc(t('no'))}"><span class="t-no" style="padding:2px 7px;border-radius:5px">${r.no}</span></td>
         <td class="num" data-l="${esc(t('open_'))}">${tot-r.yes-r.no}</td>
@@ -882,6 +947,7 @@ async function adminReport(){
     </div>
     <div class="tblwrap"><table class="tbl rep cards"><thead><tr>
       <th>${t('colCountry')}</th><th class="num">${t('colTurnover')}</th>
+      <th class="num">${t('colPS')}</th><th class="num" title="${esc(t('colDDFull'))}">${t('colDD')}</th>
       <th>${t('colYesItems')}</th><th>${t('colNoItems')}</th><th>${t('colComments')}</th></tr></thead>
       <tbody id="repBody"></tbody></table></div>`;
   const draw = () => {
@@ -896,10 +962,12 @@ async function adminReport(){
           <div style="margin-top:6px">${r.completed_at?`<span class="st-done">${esc(t('done',{d:fmtDate(r.completed_at)}))}</span>`:`<span class="st-work">${t('inWork')}</span>`}</div>
           ${d.open?`<div class="sub" style="margin-top:4px">${d.open} ${t('open_')}</div>`:''}</td>
         <td class="num rt" data-l="${esc(t('colTurnover'))}">${r.turnover!=null?'€ '+esc(fmtMoney(r.turnover)):'—'}</td>
+        <td class="num rt" data-l="${esc(t('colPS'))}">${r.parallel_structures??'—'}</td>
+        <td class="num rt" data-l="${esc(t('colDD'))}">${r.dd_leaders??'—'}</td>
         <td data-l="${esc(t('colYesItems'))}"><details class="rdet" ${isMobile()?'':'open'}><summary><span class="cnt-h t-yes">✓ ${d.yes.length}</span></summary>${li(d.yes,'y')}</details></td>
         <td data-l="${esc(t('colNoItems'))}"><details class="rdet" open><summary><span class="cnt-h t-no">✗ ${d.no.length}</span></summary>${li(d.no,'n')}</details></td>
         <td data-l="${esc(t('colComments'))}">${cms}</td></tr>`;
-    }).join('') : `<tr><td colspan="5"><div class="empty">${t('noRows')}</div></td></tr>`;
+    }).join('') : `<tr><td colspan="7"><div class="empty">${t('noRows')}</div></td></tr>`;
   };
   draw();
   document.getElementById('repOwner').onchange = e => { REP_OWNER = e.target.value; draw(); };
@@ -912,6 +980,7 @@ function exportReport(){
     const d = prepReport(r);
     const join = arr => arr.map(x=>`${x.lbl}: ${x.txt}`).join('\n');
     rows.push([r.country, r.label, `${r.stage} · ${stageShort(r.stage-1)}`, r.turnover!=null?Number(r.turnover):'',
+      r.parallel_structures??'', r.dd_leaders??'',
       r.completed_at ? t('done',{d:fmtDate(r.completed_at)}) : t('inWork'),
       d.yes.length, d.no.length, d.open, join(d.yes), join(d.no),
       d.cm.map(x=>`${x.lbl} ${x.status==='no'?'✗':'✓'} ${x.txt} — ${x.comment}`).join('\n')]);
